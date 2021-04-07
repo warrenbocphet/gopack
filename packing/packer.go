@@ -26,10 +26,11 @@ func (a BySize) Less(i, j int) bool {
 }
 
 type Packer struct {
-	partitions []Partition
-	img *image.RGBA
+	partitions  []Partition
+	metas       []Meta
+	img         *image.RGBA
 	numberOfImg int
-	debug *os.File
+	debug       *os.File
 }
 
 func CreatePacker(width, height int) Packer {
@@ -45,11 +46,35 @@ func CreatePacker(width, height int) Packer {
 			Max: image.Point{X: width, Y: height},
 		}),
 		numberOfImg: 0,
-		debug: debugFie,
+		debug:       debugFie,
 	}
 }
 
-func (p *Packer) AddImage(newImg image.RGBA)  {
+func (p *Packer) GenerateMetas(paths []string) {
+	p.metas = GenerateMetas(paths)
+}
+
+func (p *Packer) Pack() {
+	// First pass, try to push full size img to main canvas
+	i := 0
+	for true {
+		if i == len(p.metas) {
+			break
+		}
+
+		success, err := p.OpenAndAddImage(p.metas[i].path)
+		must(err)
+
+		if success {
+			// Delete this meta
+			p.metas = append(p.metas[:i], p.metas[i+1:]...)
+		} else {
+			i++
+		}
+	}
+}
+
+func (p *Packer) AddImage(newImg image.RGBA) bool {
 	// Step 1: Check for available partition
 	width, height := newImg.Bounds().Dx(), newImg.Bounds().Dy()
 	for i := range p.partitions {
@@ -80,32 +105,33 @@ func (p *Packer) AddImage(newImg image.RGBA)  {
 			sort.Sort(BySize(p.partitions))
 
 			p.numberOfImg++
-			return
+			return true
 		}
 	}
 
 	p.Debug("Cannot find suitable partition")
+	return false
 }
 
-func (p *Packer) OpenAndAddImage(path string) error {
+func (p *Packer) OpenAndAddImage(path string) (bool, error) {
 	p.Debug("Finding suitable partition for " + path)
 
 	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer f.Close()
 
 	img, _, err := image.Decode(f)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	rgbaImg := image.NewRGBA(image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy()))
 	draw.Draw(rgbaImg, rgbaImg.Bounds(), img, img.Bounds().Min, draw.Src)
-	p.AddImage(*rgbaImg)
+	success := p.AddImage(*rgbaImg)
 
-	return nil
+	return success, nil
 }
 
 func (p Packer) ToFile(path string) {
