@@ -51,6 +51,10 @@ type Meta struct {
 	ratio  float32
 }
 
+func (m Meta) Ratio() float32 {
+	return m.ratio
+}
+
 func must(err error) {
 	if err != nil {
 		panic(err)
