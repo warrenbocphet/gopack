@@ -2,11 +2,13 @@ package packing
 
 import (
 	"fmt"
+	"github.com/nfnt/resize"
 	"image"
 	"image/draw"
 	_ "image/jpeg"
 	"image/png"
 	_ "image/png"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -75,32 +77,61 @@ func (p *Packer) Pack() {
 	}
 
 	// Second pass, try to fit the rest of the partition with photo with ~ same ratio
-	//i = 0
-	//for true {
-	//	if len(p.partitions) == 0 || len(p.metas) == 0 {
-	//		break
-	//	}
-	//
-	//	bestMetaInd := 0
-	//	bestRatioDiff := 1000.0
-	//	for j := range p.metas {
-	//		ratioDiff := math.Abs(float64(p.metas[j].Ratio() - p.partitions[i].Ratio()))
-	//		if ratioDiff < bestRatioDiff {
-	//			bestRatioDiff = ratioDiff
-	//			bestMetaInd = j
-	//		}
-	//
-	//		meta := p.metas[bestMetaInd]
-	//		img, err := openImage(meta.path)
-	//		must(err)
-	//
-	//		newImg := resize.Thumbnail(p.partitions[i].Width(), p.partitions[i].Height(), img, resize.Bilinear)
-	//		rgbaImg := image.NewRGBA(image.Rect(0, 0, newImg.Bounds().Dx(), newImg.Bounds().Dy()))
-	//		draw.Draw(rgbaImg, rgbaImg.Bounds(), newImg, newImg.Bounds().Min, draw.Src)
-	//
-	//	}
-	//
-	//}
+	i = 0
+	for true {
+		if len(p.partitions) == 0 || len(p.metas) == 0 {
+			break
+		}
+
+		bestMetaInd := 0
+		bestRatioDiff := 1000.0
+		for j := range p.metas {
+			ratioDiff := math.Abs(float64(p.metas[j].Ratio() - p.partitions[i].Ratio()))
+			if ratioDiff < bestRatioDiff {
+				bestRatioDiff = ratioDiff
+				bestMetaInd = j
+			}
+		}
+
+		meta := p.metas[bestMetaInd]
+		img, err := openImage(meta.path)
+		must(err)
+
+		newImg := resize.Thumbnail(p.partitions[i].Width(), p.partitions[i].Height(), img, resize.Bilinear)
+		rgbaImg := image.NewRGBA(image.Rect(0, 0, newImg.Bounds().Dx(), newImg.Bounds().Dy()))
+		draw.Draw(rgbaImg, rgbaImg.Bounds(), newImg, newImg.Bounds().Min, draw.Src)
+
+		p.addImage(*rgbaImg, i, true)
+		p.metas = append(p.metas[:bestMetaInd], p.metas[bestMetaInd+1:]...)
+	}
+}
+
+func (p *Packer) addImage(newImg image.RGBA, partitionInd int, isReverse bool) {
+	pivotPoint := p.partitions[partitionInd].P1()
+	dp := image.Point{X: int(pivotPoint.X()), Y: int(pivotPoint.Y())}
+	// Add the image to Packer's image (code from https://blog.golang.org/image-draw)
+	r := image.Rectangle{Min: dp, Max: dp.Add(newImg.Bounds().Size())}
+	draw.Draw(p.img, r, &newImg, newImg.Bounds().Min, draw.Src)
+	newPartition1, newPartition2 := p.partitions[partitionInd].AddRectangle(uint(newImg.Bounds().Dx()), uint(newImg.Bounds().Dy()), false)
+
+	// Delete current partition and add two new partitions from the split
+	p.partitions = append(p.partitions[:partitionInd], p.partitions[partitionInd+1:]...)
+
+	if newPartition1.Size() > 0 {
+		p.partitions = append(p.partitions, newPartition1)
+	}
+	if newPartition2.Size() > 0 {
+		p.partitions = append(p.partitions, newPartition2)
+	}
+
+	// Sort the partition
+	if isReverse {
+		sort.Sort(sort.Reverse(BySize(p.partitions)))
+	} else {
+		sort.Sort(BySize(p.partitions))
+	}
+
+	p.numberOfImg++
 }
 
 func (p *Packer) AddImage(newImg image.RGBA) bool {
@@ -113,27 +144,7 @@ func (p *Packer) AddImage(newImg image.RGBA) bool {
 				p.Debug("Rectangle " + strconv.Itoa(j) + ": " + fmt.Sprint(p.partitions[j].P1().X()) + ", " + fmt.Sprint(p.partitions[j].P1().Y()) + ", " + fmt.Sprint(p.partitions[j].P2().X()) + ", " + fmt.Sprint(p.partitions[j].P2().Y()))
 			}
 
-			pivotPoint := p.partitions[i].P1()
-			dp := image.Point{X: int(pivotPoint.X()), Y: int(pivotPoint.Y())}
-			// Add the image to Packer's image (code from https://blog.golang.org/image-draw)
-			r := image.Rectangle{Min: dp, Max: dp.Add(newImg.Bounds().Size())}
-			draw.Draw(p.img, r, &newImg, newImg.Bounds().Min, draw.Src)
-			newPartition1, newPartition2 := p.partitions[i].AddRectangle(uint(newImg.Bounds().Dx()), uint(newImg.Bounds().Dy()), false)
-
-			// Delete current partition and add two new partitions from the split
-			p.partitions = append(p.partitions[:i], p.partitions[i+1:]...)
-
-			if newPartition1.Size() > 0 {
-				p.partitions = append(p.partitions, newPartition1)
-			}
-			if newPartition2.Size() > 0 {
-				p.partitions = append(p.partitions, newPartition2)
-			}
-
-			// Sort the partition
-			sort.Sort(BySize(p.partitions))
-
-			p.numberOfImg++
+			p.addImage(newImg, i, false)
 			return true
 		}
 	}
