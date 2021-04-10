@@ -1,11 +1,14 @@
 package packing
 
 import (
+	"fmt"
+	"github.com/nfnt/resize"
 	"image"
 	"image/draw"
 	_ "image/jpeg"
 	"image/png"
 	_ "image/png"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -26,13 +29,14 @@ func (a BySize) Less(i, j int) bool {
 }
 
 type Packer struct {
-	partitions []Partition
-	img *image.RGBA
+	partitions  []Partition
+	metas       []Meta
+	img         *image.RGBA
 	numberOfImg int
-	debug *os.File
+	debug       *os.File
 }
 
-func CreatePacker(width, height int) Packer {
+func CreatePacker(width, height uint) Packer {
 	var partitions []Partition
 	partitions = append(partitions, CreatePartition(Point{0, 0}, Point{width, height}))
 	debugFie, _ := os.Create("debug.txt")
@@ -42,70 +46,140 @@ func CreatePacker(width, height int) Packer {
 		partitions: partitions,
 		img: image.NewRGBA(image.Rectangle{
 			Min: image.Point{X: 0, Y: 0},
-			Max: image.Point{X: width, Y: height},
+			Max: image.Point{X: int(width), Y: int(height)},
 		}),
 		numberOfImg: 0,
-		debug: debugFie,
+		debug:       debugFie,
 	}
 }
 
-func (p *Packer) AddImage(newImg image.RGBA)  {
+func (p *Packer) GenerateMetas(paths []string) {
+	p.metas = GenerateMetas(paths)
+}
+
+func (p *Packer) Pack() {
+	// First pass, try to push full size img to main canvas
+	i := 0
+	for true {
+		if i == len(p.metas) {
+			break
+		}
+
+		success, err := p.OpenAndAddImage(p.metas[i].path)
+		must(err)
+
+		if success {
+			// Delete this meta
+			p.metas = append(p.metas[:i], p.metas[i+1:]...)
+		} else {
+			i++
+		}
+	}
+
+	// Second pass, try to fit the rest of the partition with photo with ~ same ratio
+	i = 0
+	for true {
+		if len(p.partitions) == 0 || len(p.metas) == 0 {
+			break
+		}
+
+		bestMetaInd := 0
+		bestRatioDiff := 1000.0
+		for j := range p.metas {
+			ratioDiff := math.Abs(float64(p.metas[j].Ratio() - p.partitions[i].Ratio()))
+			if ratioDiff < bestRatioDiff {
+				bestRatioDiff = ratioDiff
+				bestMetaInd = j
+			}
+		}
+
+		meta := p.metas[bestMetaInd]
+		img, err := openImage(meta.path)
+		must(err)
+
+		newImg := resize.Thumbnail(p.partitions[i].Width(), p.partitions[i].Height(), img, resize.Bilinear)
+		rgbaImg := image.NewRGBA(image.Rect(0, 0, newImg.Bounds().Dx(), newImg.Bounds().Dy()))
+		draw.Draw(rgbaImg, rgbaImg.Bounds(), newImg, newImg.Bounds().Min, draw.Src)
+
+		p.addImage(*rgbaImg, i, true)
+		p.metas = append(p.metas[:bestMetaInd], p.metas[bestMetaInd+1:]...)
+	}
+}
+
+func (p *Packer) addImage(newImg image.RGBA, partitionInd int, isReverse bool) {
+	pivotPoint := p.partitions[partitionInd].P1()
+	dp := image.Point{X: int(pivotPoint.X()), Y: int(pivotPoint.Y())}
+	// Add the image to Packer's image (code from https://blog.golang.org/image-draw)
+	r := image.Rectangle{Min: dp, Max: dp.Add(newImg.Bounds().Size())}
+	draw.Draw(p.img, r, &newImg, newImg.Bounds().Min, draw.Src)
+	newPartition1, newPartition2 := p.partitions[partitionInd].AddRectangle(uint(newImg.Bounds().Dx()), uint(newImg.Bounds().Dy()), false)
+
+	// Delete current partition and add two new partitions from the split
+	p.partitions = append(p.partitions[:partitionInd], p.partitions[partitionInd+1:]...)
+
+	if newPartition1.Size() > 0 {
+		p.partitions = append(p.partitions, newPartition1)
+	}
+	if newPartition2.Size() > 0 {
+		p.partitions = append(p.partitions, newPartition2)
+	}
+
+	// Sort the partition
+	if isReverse {
+		sort.Sort(sort.Reverse(BySize(p.partitions)))
+	} else {
+		sort.Sort(BySize(p.partitions))
+	}
+
+	p.numberOfImg++
+}
+
+func (p *Packer) AddImage(newImg image.RGBA) bool {
 	// Step 1: Check for available partition
 	width, height := newImg.Bounds().Dx(), newImg.Bounds().Dy()
 	for i := range p.partitions {
-		if p.partitions[i].BigEnough(width, height) {
+		if p.partitions[i].BigEnough(uint(width), uint(height)) {
 			p.Debug("Found a suitable partition")
 			for j := range p.partitions {
-				p.Debug("Rectangle " + strconv.Itoa(j) + ": " + strconv.Itoa(p.partitions[j].P1().X()) + ", " + strconv.Itoa(p.partitions[j].P1().Y()) + ", " + strconv.Itoa(p.partitions[j].P2().X()) + ", " + strconv.Itoa(p.partitions[j].P2().Y()))
+				p.Debug("Rectangle " + strconv.Itoa(j) + ": " + fmt.Sprint(p.partitions[j].P1().X()) + ", " + fmt.Sprint(p.partitions[j].P1().Y()) + ", " + fmt.Sprint(p.partitions[j].P2().X()) + ", " + fmt.Sprint(p.partitions[j].P2().Y()))
 			}
 
-			pivotPoint := p.partitions[i].P1()
-			dp := image.Point{X: pivotPoint.X(), Y: pivotPoint.Y()}
-			// Add the image to Packer's image (code from https://blog.golang.org/image-draw)
-			r := image.Rectangle{Min: dp, Max: dp.Add(newImg.Bounds().Size())}
-			draw.Draw(p.img, r, &newImg, newImg.Bounds().Min, draw.Src)
-			newPartition1, newPartition2 := p.partitions[i].AddRectangle(newImg.Bounds().Dx(), newImg.Bounds().Dy(), false)
-
-			// Delete current partition and add two new partitions from the split
-			p.partitions = append(p.partitions[:i], p.partitions[i+1:]...)
-
-			if newPartition1.Size() > 0 {
-				p.partitions = append(p.partitions, newPartition1)
-			}
-			if newPartition2.Size() > 0 {
-				p.partitions = append(p.partitions, newPartition2)
-			}
-
-			// Sort the partition
-			sort.Sort(BySize(p.partitions))
-
-			p.numberOfImg++
-			return
+			p.addImage(newImg, i, false)
+			return true
 		}
 	}
 
 	p.Debug("Cannot find suitable partition")
+	return false
 }
 
-func (p *Packer) OpenAndAddImage(path string) error {
-	p.Debug("Finding suitable partition for " + path)
-
+func openImage(path string) (*image.RGBA, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return &image.RGBA{}, err
 	}
 	defer f.Close()
 
 	img, _, err := image.Decode(f)
 	if err != nil {
-		return err
+		return &image.RGBA{}, err
 	}
 
 	rgbaImg := image.NewRGBA(image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy()))
 	draw.Draw(rgbaImg, rgbaImg.Bounds(), img, img.Bounds().Min, draw.Src)
-	p.AddImage(*rgbaImg)
 
-	return nil
+	return rgbaImg, err
+}
+
+func (p *Packer) OpenAndAddImage(path string) (bool, error) {
+	p.Debug("Finding suitable partition for " + path)
+
+	rgbaImg, err := openImage(path)
+	must(err)
+
+	success := p.AddImage(*rgbaImg)
+
+	return success, nil
 }
 
 func (p Packer) ToFile(path string) {
