@@ -13,6 +13,7 @@ func (p Point) Y() uint {
 	return p.y
 }
 
+// Partition represent the single cell that an image can be inserted in.
 type Partition struct {
 	p1    Point
 	p2    Point
@@ -35,6 +36,7 @@ func CreatePartition(p1, p2 Point) Partition {
 	}
 }
 
+// A high level function that split up a partition based on the image added in the partition
 func (p Partition) AddRectangle(width, height uint, hMajor bool) (Partition, Partition) {
 	return p.split(Point{p.p1.X() + width, p.p1.Y() + height}, hMajor)
 }
