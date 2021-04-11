@@ -44,6 +44,7 @@ func GenerateMetas(paths []string) []Meta {
 	return metas
 }
 
+// Meta holds meta information about a particular image
 type Meta struct {
 	path   string
 	width  int

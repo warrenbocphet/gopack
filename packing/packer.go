@@ -59,8 +59,13 @@ func (p *Packer) GenerateMetas(paths []string) {
 
 func (p *Packer) Pack() {
 	// First pass, try to push full size img to main canvas
+	// Every time an image is added, the partitions will be sorted by size
+	// in ascending order (best fit).
+	sort.Sort(BySize(p.partitions))
 	i := 0
 	for true {
+		// Iterate through all images found in the folder
+		// to find fit partition
 		if i == len(p.metas) {
 			break
 		}
@@ -77,12 +82,23 @@ func (p *Packer) Pack() {
 	}
 
 	// Second pass, try to fit the rest of the partition with photo with ~ same ratio
+	// By now, most "good" partition is already used. We need to sort the partition in
+	// descending order (based on size).
+	sort.Sort(sort.Reverse(BySize(p.partitions)))
 	i = 0
 	for true {
+		// We will keep trying to add stuffs into the main image until
+		// we ran out of images to add, or we ran out partitions
 		if len(p.partitions) == 0 || len(p.metas) == 0 {
 			break
 		}
 
+		// Since we have the ability to resize images, it is almost guarantee that any images can fit in any partition.
+		// The harder part is to know what is the best image to fit in a partition.
+		// The metric I used to measure is: [ratioDiff = image.ratio - partition.ratio]
+		// Smaller ratioDiff the better
+		// One problem with this metric is partition that are way too small for an image might still
+		// be chosen due to ratioDiff still very small.
 		bestMetaInd := 0
 		bestRatioDiff := 1000.0
 		for j := range p.metas {
@@ -98,20 +114,23 @@ func (p *Packer) Pack() {
 		must(err)
 
 		newImg := resize.Thumbnail(p.partitions[i].Width(), p.partitions[i].Height(), img, resize.Bilinear)
-		rgbaImg := image.NewRGBA(image.Rect(0, 0, newImg.Bounds().Dx(), newImg.Bounds().Dy()))
-		draw.Draw(rgbaImg, rgbaImg.Bounds(), newImg, newImg.Bounds().Min, draw.Src)
+		rgbaImg := toRGBA(newImg)
 
 		p.addImage(*rgbaImg, i, true)
 		p.metas = append(p.metas[:bestMetaInd], p.metas[bestMetaInd+1:]...)
 	}
 }
 
-func (p *Packer) addImage(newImg image.RGBA, partitionInd int, isReverse bool) {
+// Add the image to selected partition and sort by size
+func (p *Packer) addImage(newImg image.RGBA, partitionInd int, isDescending bool) {
+	// Add the image to Packer's image (code from https://blog.golang.org/image-draw)
 	pivotPoint := p.partitions[partitionInd].P1()
 	dp := image.Point{X: int(pivotPoint.X()), Y: int(pivotPoint.Y())}
-	// Add the image to Packer's image (code from https://blog.golang.org/image-draw)
+
 	r := image.Rectangle{Min: dp, Max: dp.Add(newImg.Bounds().Size())}
 	draw.Draw(p.img, r, &newImg, newImg.Bounds().Min, draw.Src)
+
+	// Keeping track of the partition by notifying the used are of this partition to itself
 	newPartition1, newPartition2 := p.partitions[partitionInd].AddRectangle(uint(newImg.Bounds().Dx()), uint(newImg.Bounds().Dy()), false)
 
 	// Delete current partition and add two new partitions from the split
@@ -125,7 +144,7 @@ func (p *Packer) addImage(newImg image.RGBA, partitionInd int, isReverse bool) {
 	}
 
 	// Sort the partition
-	if isReverse {
+	if isDescending {
 		sort.Sort(sort.Reverse(BySize(p.partitions)))
 	} else {
 		sort.Sort(BySize(p.partitions))
@@ -134,6 +153,8 @@ func (p *Packer) addImage(newImg image.RGBA, partitionInd int, isReverse bool) {
 	p.numberOfImg++
 }
 
+// A high level call to add another image to the packer.
+// This will need to iterate through all partition to find appropriate partition to fit the data in
 func (p *Packer) AddImage(newImg image.RGBA) bool {
 	// Step 1: Check for available partition
 	width, height := newImg.Bounds().Dx(), newImg.Bounds().Dy()
@@ -165,8 +186,7 @@ func openImage(path string) (*image.RGBA, error) {
 		return &image.RGBA{}, err
 	}
 
-	rgbaImg := image.NewRGBA(image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy()))
-	draw.Draw(rgbaImg, rgbaImg.Bounds(), img, img.Bounds().Min, draw.Src)
+	rgbaImg := toRGBA(img)
 
 	return rgbaImg, err
 }
@@ -201,4 +221,11 @@ func (p Packer) Debug(msg string) {
 
 func (p Packer) Clean() {
 	p.debug.Close()
+}
+
+func toRGBA(img image.Image) *image.RGBA {
+	rgbaImg := image.NewRGBA(image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy()))
+	draw.Draw(rgbaImg, rgbaImg.Bounds(), img, img.Bounds().Min, draw.Src)
+
+	return rgbaImg
 }
