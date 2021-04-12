@@ -97,3 +97,7 @@ func (p Partition) P1() Point {
 func (p Partition) P2() Point {
 	return p.p2
 }
+
+func (p Partition) IsValid() bool {
+	return p.Size() > 0 && p.Width() > 10 && p.Height() > 10
+}

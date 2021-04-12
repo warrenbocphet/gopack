@@ -136,10 +136,10 @@ func (p *Packer) addImage(newImg image.RGBA, partitionInd int, isDescending bool
 	// Delete current partition and add two new partitions from the split
 	p.partitions = append(p.partitions[:partitionInd], p.partitions[partitionInd+1:]...)
 
-	if newPartition1.Size() > 0 {
+	if newPartition1.IsValid() {
 		p.partitions = append(p.partitions, newPartition1)
 	}
-	if newPartition2.Size() > 0 {
+	if newPartition2.IsValid() {
 		p.partitions = append(p.partitions, newPartition2)
 	}
 
