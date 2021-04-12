@@ -47,16 +47,17 @@ func (p Partition) split(point Point, hMajor bool) (Partition, Partition) {
 	if hMajor {
 		// Case 1: horizontal major
 		p1, p2 := Point{point.X(), p.p1.Y()}, Point{p.p2.X(), point.Y()}
-		partition1 = CreatePartition(p1, p2)
-
 		pA, pB := Point{p.p1.X(), point.Y()}, p.p2
+
+		partition1 = CreatePartition(p1, p2)
 		partition2 = CreatePartition(pA, pB)
+
 	} else {
 		// Case 2: vertical major
 		p1, p2 := Point{point.X(), p.p1.Y()}, p.p2
-		partition1 = CreatePartition(p1, p2)
-
 		pA, pB := Point{p.p1.X(), point.Y()}, Point{point.X(), p.p2.Y()}
+
+		partition1 = CreatePartition(p1, p2)
 		partition2 = CreatePartition(pA, pB)
 	}
 
@@ -99,5 +100,5 @@ func (p Partition) P2() Point {
 }
 
 func (p Partition) IsValid() bool {
-	return p.Size() > 0 && p.Width() > 10 && p.Height() > 10
+	return p.Size() > 0 && p.Width() > 25 && p.Height() > 25
 }
