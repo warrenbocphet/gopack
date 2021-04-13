@@ -1,7 +1,6 @@
 package packing
 
 import (
-	"fmt"
 	"github.com/nfnt/resize"
 	"image"
 	"image/draw"
@@ -11,7 +10,6 @@ import (
 	"math"
 	"os"
 	"sort"
-	"strconv"
 )
 
 type BySize []Partition
@@ -33,23 +31,19 @@ type Packer struct {
 	metas       []Meta
 	img         *image.RGBA
 	numberOfImg int
-	debug       *os.File
 }
 
-func CreatePacker(width, height uint) Packer {
+func CreatePacker(width, height int) Packer {
 	var partitions []Partition
 	partitions = append(partitions, CreatePartition(Point{0, 0}, Point{width, height}))
-	debugFie, _ := os.Create("debug.txt")
-	_ = debugFie.Truncate(0)
 
 	return Packer{
 		partitions: partitions,
 		img: image.NewRGBA(image.Rectangle{
 			Min: image.Point{X: 0, Y: 0},
-			Max: image.Point{X: int(width), Y: int(height)},
+			Max: image.Point{X: width, Y: height},
 		}),
 		numberOfImg: 0,
-		debug:       debugFie,
 	}
 }
 
@@ -70,7 +64,7 @@ func (p *Packer) Pack() {
 			break
 		}
 
-		success, err := p.OpenAndAddImage(p.metas[i].path)
+		success, err := p.openAndAddImage(p.metas[i].path)
 		must(err)
 
 		if success {
@@ -113,33 +107,65 @@ func (p *Packer) Pack() {
 		img, err := openImage(meta.path)
 		must(err)
 
-		newImg := resize.Thumbnail(p.partitions[i].Width(), p.partitions[i].Height(), img, resize.Bilinear)
-		rgbaImg := toRGBA(newImg)
-
-		p.addImage(*rgbaImg, i, true)
+		p.addImageToPartition(img, i, true)
 		p.metas = append(p.metas[:bestMetaInd], p.metas[bestMetaInd+1:]...)
 	}
 }
 
 // Add the image to selected partition and sort by size
-func (p *Packer) addImage(newImg image.RGBA, partitionInd int, isDescending bool) {
+func (p *Packer) addImageToPartition(newImg *image.RGBA, partitionInd int, isDescending bool) {
+	// Automatically resize the photo to fit into the partition.
+	if newImg.Bounds().Dx() > p.partitions[partitionInd].Width() && newImg.Bounds().Dy() > p.partitions[partitionInd].Height() {
+		newImg = resizeImg(newImg, p.partitions[partitionInd].Width(), p.partitions[partitionInd].Height(), 0)
+	}
+
+	// For partition that almost fit, we scale it up by a bit to fill the partition to avoid vertical or horizontal gap
+	if p.partitions[partitionInd].Width()-newImg.Bounds().Dx() < 10 && p.partitions[partitionInd].Height()-newImg.Bounds().Dy() < 10 {
+		widthRatio := float32(p.partitions[partitionInd].Width()) / float32(newImg.Bounds().Dx())
+		heightRatio := float32(p.partitions[partitionInd].Height()) / float32(newImg.Bounds().Dy())
+		if widthRatio < heightRatio {
+			newImg = resizeImg(newImg, 0, p.partitions[partitionInd].Height(), 1)
+		} else {
+			newImg = resizeImg(newImg, p.partitions[partitionInd].Width(), 0, 1)
+		}
+	} else if p.partitions[partitionInd].Width()-newImg.Bounds().Dx() < 10 {
+		newImg = resizeImg(newImg, p.partitions[partitionInd].Width(), 0, 1)
+	} else if p.partitions[partitionInd].Height()-newImg.Bounds().Dy() < 10 {
+		newImg = resizeImg(newImg, 0, p.partitions[partitionInd].Height(), 1)
+	}
+
+	// Because of our scaling, image can overflow a partition.
+	// To deal with this, we clip the image when copy over to the main image.
+	var minWidth, minHeight int
+	if newImg.Bounds().Dx() < p.partitions[partitionInd].Width() {
+		minWidth = newImg.Bounds().Dx()
+	} else {
+		minWidth = p.partitions[partitionInd].Width()
+	}
+
+	if newImg.Bounds().Dy() < p.partitions[partitionInd].Height() {
+		minHeight = newImg.Bounds().Dy()
+	} else {
+		minHeight = p.partitions[partitionInd].Height()
+	}
+
 	// Add the image to Packer's image (code from https://blog.golang.org/image-draw)
 	pivotPoint := p.partitions[partitionInd].P1()
-	dp := image.Point{X: int(pivotPoint.X()), Y: int(pivotPoint.Y())}
+	dp := image.Point{X: pivotPoint.X(), Y: pivotPoint.Y()}
 
-	r := image.Rectangle{Min: dp, Max: dp.Add(newImg.Bounds().Size())}
-	draw.Draw(p.img, r, &newImg, newImg.Bounds().Min, draw.Src)
+	r := image.Rectangle{Min: dp, Max: dp.Add(image.Point{X: minWidth, Y: minHeight})}
+	draw.Draw(p.img, r, newImg, newImg.Bounds().Min, draw.Src)
 
 	// Keeping track of the partition by notifying the used are of this partition to itself
-	newPartition1, newPartition2 := p.partitions[partitionInd].AddRectangle(uint(newImg.Bounds().Dx()), uint(newImg.Bounds().Dy()), false)
+	newPartition1, newPartition2 := p.partitions[partitionInd].AddRectangle(minWidth, minHeight, false)
 
 	// Delete current partition and add two new partitions from the split
 	p.partitions = append(p.partitions[:partitionInd], p.partitions[partitionInd+1:]...)
 
-	if newPartition1.Size() > 0 {
+	if newPartition1.IsValid() {
 		p.partitions = append(p.partitions, newPartition1)
 	}
-	if newPartition2.Size() > 0 {
+	if newPartition2.IsValid() {
 		p.partitions = append(p.partitions, newPartition2)
 	}
 
@@ -155,22 +181,16 @@ func (p *Packer) addImage(newImg image.RGBA, partitionInd int, isDescending bool
 
 // A high level call to add another image to the packer.
 // This will need to iterate through all partition to find appropriate partition to fit the data in
-func (p *Packer) AddImage(newImg image.RGBA) bool {
+func (p *Packer) addImage(newImg image.RGBA) bool {
 	// Step 1: Check for available partition
 	width, height := newImg.Bounds().Dx(), newImg.Bounds().Dy()
 	for i := range p.partitions {
-		if p.partitions[i].BigEnough(uint(width), uint(height)) {
-			p.Debug("Found a suitable partition")
-			for j := range p.partitions {
-				p.Debug("Rectangle " + strconv.Itoa(j) + ": " + fmt.Sprint(p.partitions[j].P1().X()) + ", " + fmt.Sprint(p.partitions[j].P1().Y()) + ", " + fmt.Sprint(p.partitions[j].P2().X()) + ", " + fmt.Sprint(p.partitions[j].P2().Y()))
-			}
-
-			p.addImage(newImg, i, false)
+		if p.partitions[i].BigEnough(width, height) {
+			p.addImageToPartition(&newImg, i, false)
 			return true
 		}
 	}
 
-	p.Debug("Cannot find suitable partition")
 	return false
 }
 
@@ -191,13 +211,11 @@ func openImage(path string) (*image.RGBA, error) {
 	return rgbaImg, err
 }
 
-func (p *Packer) OpenAndAddImage(path string) (bool, error) {
-	p.Debug("Finding suitable partition for " + path)
-
+func (p *Packer) openAndAddImage(path string) (bool, error) {
 	rgbaImg, err := openImage(path)
 	must(err)
 
-	success := p.AddImage(*rgbaImg)
+	success := p.addImage(*rgbaImg)
 
 	return success, nil
 }
@@ -215,17 +233,21 @@ func (p Packer) ToFile(path string) {
 	}
 }
 
-func (p Packer) Debug(msg string) {
-	p.debug.WriteString(msg + "\n")
-}
-
-func (p Packer) Clean() {
-	p.debug.Close()
-}
-
 func toRGBA(img image.Image) *image.RGBA {
 	rgbaImg := image.NewRGBA(image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy()))
 	draw.Draw(rgbaImg, rgbaImg.Bounds(), img, img.Bounds().Min, draw.Src)
 
 	return rgbaImg
+}
+
+func resizeImg(img *image.RGBA, width, height int, method int) *image.RGBA {
+	var newImg image.Image
+
+	if method == 0 {
+		newImg = resize.Thumbnail(uint(width), uint(height), img, resize.Bilinear)
+	} else {
+		newImg = resize.Resize(uint(width), uint(height), img, resize.Bilinear)
+	}
+
+	return toRGBA(newImg)
 }

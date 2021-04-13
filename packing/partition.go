@@ -1,15 +1,15 @@
 package packing
 
 type Point struct {
-	x uint
-	y uint
+	x int
+	y int
 }
 
-func (p Point) X() uint {
+func (p Point) X() int {
 	return p.x
 }
 
-func (p Point) Y() uint {
+func (p Point) Y() int {
 	return p.y
 }
 
@@ -37,7 +37,7 @@ func CreatePartition(p1, p2 Point) Partition {
 }
 
 // A high level function that split up a partition based on the image added in the partition
-func (p Partition) AddRectangle(width, height uint, hMajor bool) (Partition, Partition) {
+func (p Partition) AddRectangle(width, height int, hMajor bool) (Partition, Partition) {
 	return p.split(Point{p.p1.X() + width, p.p1.Y() + height}, hMajor)
 }
 
@@ -47,23 +47,24 @@ func (p Partition) split(point Point, hMajor bool) (Partition, Partition) {
 	if hMajor {
 		// Case 1: horizontal major
 		p1, p2 := Point{point.X(), p.p1.Y()}, Point{p.p2.X(), point.Y()}
-		partition1 = CreatePartition(p1, p2)
-
 		pA, pB := Point{p.p1.X(), point.Y()}, p.p2
+
+		partition1 = CreatePartition(p1, p2)
 		partition2 = CreatePartition(pA, pB)
+
 	} else {
 		// Case 2: vertical major
 		p1, p2 := Point{point.X(), p.p1.Y()}, p.p2
-		partition1 = CreatePartition(p1, p2)
-
 		pA, pB := Point{p.p1.X(), point.Y()}, Point{point.X(), p.p2.Y()}
+
+		partition1 = CreatePartition(p1, p2)
 		partition2 = CreatePartition(pA, pB)
 	}
 
 	return partition1, partition2
 }
 
-func (p Partition) BigEnough(width, height uint) bool {
+func (p Partition) BigEnough(width, height int) bool {
 	dw := p.p2.X() - p.p1.X()
 	dh := p.p2.Y() - p.p1.Y()
 
@@ -74,15 +75,15 @@ func (p Partition) BigEnough(width, height uint) bool {
 	return false
 }
 
-func (p Partition) Size() uint {
+func (p Partition) Size() int {
 	return (p.p2.X() - p.p1.X()) * (p.p2.Y() - p.p1.Y())
 }
 
-func (p Partition) Width() uint {
+func (p Partition) Width() int {
 	return p.p2.X() - p.p1.X()
 }
 
-func (p Partition) Height() uint {
+func (p Partition) Height() int {
 	return p.p2.Y() - p.p1.Y()
 }
 
@@ -96,4 +97,8 @@ func (p Partition) P1() Point {
 
 func (p Partition) P2() Point {
 	return p.p2
+}
+
+func (p Partition) IsValid() bool {
+	return p.Size() > 0 && p.Width() > 25 && p.Height() > 25
 }
