@@ -12,6 +12,11 @@ import (
 	"sort"
 )
 
+const (
+	tolHeight = 25
+	tolWidth  = 25
+)
+
 type BySize []Partition
 
 func (a BySize) Len() int {
@@ -120,7 +125,7 @@ func (p *Packer) addImageToPartition(newImg *image.RGBA, partitionInd int, isDes
 	}
 
 	// For partition that almost fit, we scale it up by a bit to fill the partition to avoid vertical or horizontal gap
-	if p.partitions[partitionInd].Width()-newImg.Bounds().Dx() < 10 && p.partitions[partitionInd].Height()-newImg.Bounds().Dy() < 10 {
+	if p.partitions[partitionInd].Width()-newImg.Bounds().Dx() <= tolWidth && p.partitions[partitionInd].Height()-newImg.Bounds().Dy() <= tolHeight {
 		widthRatio := float32(p.partitions[partitionInd].Width()) / float32(newImg.Bounds().Dx())
 		heightRatio := float32(p.partitions[partitionInd].Height()) / float32(newImg.Bounds().Dy())
 		if widthRatio < heightRatio {
@@ -128,9 +133,9 @@ func (p *Packer) addImageToPartition(newImg *image.RGBA, partitionInd int, isDes
 		} else {
 			newImg = resizeImg(newImg, p.partitions[partitionInd].Width(), 0, 1)
 		}
-	} else if p.partitions[partitionInd].Width()-newImg.Bounds().Dx() < 10 {
+	} else if p.partitions[partitionInd].Width()-newImg.Bounds().Dx() < tolWidth {
 		newImg = resizeImg(newImg, p.partitions[partitionInd].Width(), 0, 1)
-	} else if p.partitions[partitionInd].Height()-newImg.Bounds().Dy() < 10 {
+	} else if p.partitions[partitionInd].Height()-newImg.Bounds().Dy() < tolHeight {
 		newImg = resizeImg(newImg, 0, p.partitions[partitionInd].Height(), 1)
 	}
 
