@@ -3,6 +3,7 @@ package packing
 import (
 	"github.com/nfnt/resize"
 	"image"
+	"image/color"
 	"image/draw"
 	_ "image/jpeg"
 	"image/png"
@@ -38,16 +39,23 @@ type Packer struct {
 	numberOfImg int
 }
 
-func CreatePacker(width, height int) Packer {
+func CreatePacker(width, height int, red, green, blue, alpha uint8) Packer {
 	var partitions []Partition
 	partitions = append(partitions, CreatePartition(Point{0, 0}, Point{width, height}))
+	img := image.NewRGBA(image.Rectangle{
+		Min: image.Point{X: 0, Y: 0},
+		Max: image.Point{X: width, Y: height},
+	})
+
+	for x := 0; x < width; x++ {
+		for y := 0; y < height; y++ {
+			img.Set(x, y, color.RGBA{R: red, G: green, B: blue, A: alpha})
+		}
+	}
 
 	return Packer{
-		partitions: partitions,
-		img: image.NewRGBA(image.Rectangle{
-			Min: image.Point{X: 0, Y: 0},
-			Max: image.Point{X: width, Y: height},
-		}),
+		partitions:  partitions,
+		img:         img,
 		numberOfImg: 0,
 	}
 }

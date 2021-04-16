@@ -8,7 +8,7 @@ import (
 
 func main() {
 	paths, _ := filepath.Glob("/home/atran/Desktop/inspiration/*")
-	packer := packing.CreatePacker(2560, 1080)
+	packer := packing.CreatePacker(2560, 1080, 0, 0, 0, 1)
 
 	packer.GenerateMetas(paths)
 	packer.Pack()
