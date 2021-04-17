@@ -20,9 +20,9 @@ In another word, an image collage.
 
 ```console
 ./packer -p "/home/atran/Desktop/inspiration" \
-> -w 1920 \
-> -h 1080 \
-> -o ./wallpaper.png
+-w 1920 \
+-h 1080 \
+-o ./wallpaper.png
 ```
 
 # Notes
